@@ -2,14 +2,27 @@
 
 A private P2P network that allows low-power "Subordinate" nodes (laptops) to offload AI inference tasks to a high-power "Leader" node (GPU Desktop) securely.
 
-## 🚨 Running in WSL?
+## Demo
 
-If you're using WSL with Ollama on Windows and getting **"Connection refused"** errors, see:
+Quick demo — click the thumbnail to play. The README will try the local `video_demo.mp4` first; if you host the demo elsewhere you can replace the links below with your CDN or YouTube URL.
 
-- 🔧 **[FIX_CONNECTION_ERROR.md](FIX_CONNECTION_ERROR.md)** - Quick fix guide
-- 📖 **[WSL_SETUP.md](WSL_SETUP.md)** - Complete WSL setup instructions
+- Local file: [video_demo.mp4](video_demo.mp4)
 
-**TL;DR:** Use `./wsl_serve.sh` instead of the regular serve command.
+<!-- Thumbnail that links to the video file -->
+
+[![Axon-Cluster Demo](video_demo_thumbnail.png)](video_demo.mp4)
+
+<video src="video_demo.mp4" controls poster="video_demo_thumbnail.png" style="max-width:100%;height:auto"></video>
+
+If you'd like to embed a hosted YouTube demo instead, replace the block above with the following (change VIDEO_ID):
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/VIDEO_ID" title="Axon-Cluster demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="max-width:100%;height:auto"></iframe>
+
+Generate a thumbnail from `video_demo.mp4` with ffmpeg:
+
+```bash
+ffmpeg -i video_demo.mp4 -ss 00:00:02.000 -vframes 1 video_demo_thumbnail.png
+```
 
 ## Features
 
