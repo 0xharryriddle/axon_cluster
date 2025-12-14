@@ -77,7 +77,22 @@ cargo build --release
 
 ## Usage
 
-### Running the Leader (Server)
+### Web UI (Recommended)
+
+The easiest way to interact with Axon Cluster:
+
+```bash
+# One-command start (builds, installs dependencies, starts everything)
+./start_web.sh
+```
+
+Then open **http://localhost:5173** in your browser for a ChatGPT-like interface.
+
+📚 **[Complete Web UI Documentation →](WEB_UI.md)**
+
+### CLI Mode
+
+#### Running the Leader (Server)
 
 On your GPU Desktop or powerful machine:
 
@@ -103,7 +118,7 @@ On your GPU Desktop or powerful machine:
 👂 Listening on: /ip4/0.0.0.0/tcp/54321
 ```
 
-### Running a Subordinate (Client)
+#### Running a Subordinate (Client)
 
 On your laptop or low-power device:
 
@@ -248,10 +263,19 @@ ollama serve
 - Ensure Leader has sufficient resources (GPU/RAM)
 - Check network latency
 
+## Documentation
+
+- **[WEB_UI.md](WEB_UI.md)** - Complete web interface guide (sidecar pattern, API reference, troubleshooting)
+- **[QUICKSTART.md](QUICKSTART.md)** - CLI-based quick start tutorial
+- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** - Technical implementation details
+- **[WSL_SETUP.md](WSL_SETUP.md)** - WSL-specific configuration and troubleshooting
+
 ## Dependencies
 
 - **libp2p**: P2P networking with PSK, Noise, mDNS
-- **tokio**: Async runtime
+- **tokio**: Async runtime with channels (mpsc, oneshot)
+- **axum**: HTTP server for web UI
+- **tower-http**: CORS middleware
 - **reqwest**: HTTP client for Ollama API
 - **serde/serde_json**: Serialization
 - **clap**: CLI argument parsing

@@ -13,12 +13,15 @@ use libp2p::{
 use std::{collections::HashMap, fs, iter, path::Path, time::Duration};
 
 pub mod cli;
+pub mod http_server;
 pub mod ollama;
 pub mod protocol;
 
 use cli::Mode;
+use http_server::SwarmCommand;
 use ollama::OllamaClient;
 use protocol::{InferenceCodec, InferenceRequest, InferenceResponse};
+use tokio::sync::{mpsc, oneshot};
 
 /// Network behavior combining mDNS and request-response
 #[derive(NetworkBehaviour)]
@@ -47,7 +50,18 @@ async fn main() -> Result<()> {
             } else {
                 ollama_url
             };
-            run_leader(psk_bytes, final_url, model).await?;
+            run_leader(psk_bytes, final_url, model, false).await?;
+        }
+        Mode::Web { ollama_url, model } => {
+            // Use OLLAMA_LOCALHOST env var if ollama_url is the default
+            let final_url = if ollama_url == "http://localhost:11434"
+                || ollama_url == "http://127.0.0.1:11434"
+            {
+                std::env::var("OLLAMA_LOCALHOST").unwrap_or(ollama_url)
+            } else {
+                ollama_url
+            };
+            run_leader(psk_bytes, final_url, model, true).await?;
         }
         Mode::Ask { prompt } => {
             run_subordinate(psk_bytes, prompt).await?;
@@ -143,10 +157,19 @@ fn create_swarm(psk_bytes: [u8; 32]) -> Result<Swarm<AxonBehaviour>> {
 }
 
 /// Run in Leader mode (server)
-async fn run_leader(psk_bytes: [u8; 32], ollama_url: String, model: String) -> Result<()> {
+async fn run_leader(
+    psk_bytes: [u8; 32],
+    ollama_url: String,
+    model: String,
+    enable_http: bool,
+) -> Result<()> {
     println!("🚀 Starting Leader Mode (Server)");
     println!("📡 Ollama URL: {}", ollama_url);
     println!("🤖 Model: {}", model);
+
+    if enable_http {
+        println!("🌐 Web UI mode enabled");
+    }
 
     let mut swarm = create_swarm(psk_bytes)?;
 
@@ -155,6 +178,12 @@ async fn run_leader(psk_bytes: [u8; 32], ollama_url: String, model: String) -> R
 
     let ollama_client = OllamaClient::new(ollama_url);
 
+    // If HTTP mode is enabled, start the HTTP server and use command channel
+    if enable_http {
+        return run_leader_with_http(swarm, ollama_client, model).await;
+    }
+
+    // Standard P2P-only mode
     loop {
         match swarm.select_next_some().await {
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -204,6 +233,130 @@ async fn run_leader(psk_bytes: [u8; 32], ollama_url: String, model: String) -> R
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// Run Leader with HTTP API server (Web UI mode)
+async fn run_leader_with_http(
+    mut swarm: Swarm<AxonBehaviour>,
+    ollama_client: OllamaClient,
+    model: String,
+) -> Result<()> {
+    // Create command channel for HTTP -> Swarm communication
+    let (command_tx, mut command_rx) = mpsc::channel::<SwarmCommand>(32);
+
+    // Store pending requests: RequestId -> oneshot::Sender
+    let mut pending_requests: HashMap<OutboundRequestId, oneshot::Sender<Result<String, String>>> =
+        HashMap::new();
+
+    // Spawn HTTP server in background
+    let _http_handle = tokio::spawn(async move {
+        if let Err(e) = http_server::start_server(command_tx).await {
+            eprintln!("HTTP server error: {}", e);
+        }
+    });
+
+    // Main event loop with tokio::select!
+    loop {
+        tokio::select! {
+            // Handle HTTP commands from web UI
+            Some(cmd) = command_rx.recv() => {
+                match cmd {
+                    SwarmCommand::Ask { prompt, responder } => {
+                        println!("🌐 HTTP request: {}", prompt);
+
+                        // We need to discover a Leader peer first
+                        // For simplicity, we'll send to the first discovered peer
+                        // In a real implementation, you'd track discovered peers
+
+                        // For now, send error if no peers discovered
+                        // This needs improvement - we should track peers from mDNS
+                        let _ = responder.send(Err(
+                            "Web UI mode currently requires P2P peers. Use 'ask' mode from another node.".to_string()
+                        ));
+
+                        // TODO: Implement proper peer tracking and request forwarding
+                        // let request = InferenceRequest {
+                        //     prompt,
+                        //     model: Some(model.clone()),
+                        // };
+                        // let req_id = swarm.behaviour_mut()
+                        //     .request_response
+                        //     .send_request(&peer_id, request);
+                        // pending_requests.insert(req_id, responder);
+                    }
+                }
+            }
+
+            // Handle P2P swarm events
+            event = swarm.select_next_some() => {
+                match event {
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        println!("👂 Listening on: {}", address);
+                    }
+                    SwarmEvent::Behaviour(AxonBehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
+                        for (peer_id, _addr) in peers {
+                            println!("🔍 Discovered peer: {}", peer_id);
+                        }
+                    }
+                    SwarmEvent::Behaviour(AxonBehaviourEvent::RequestResponse(
+                        request_response::Event::Message {
+                            message:
+                                request_response::Message::Request {
+                                    request, channel, ..
+                                },
+                            ..
+                        },
+                    )) => {
+                        println!("📨 Received P2P inference request: {:?}", request.prompt);
+
+                        // Process the inference request with Ollama
+                        let model_name = request.model.unwrap_or_else(|| model.clone());
+                        let response = match ollama_client.generate(request.prompt, model_name).await {
+                            Ok(text) => InferenceResponse {
+                                response: text,
+                                success: true,
+                                error: None,
+                            },
+                            Err(e) => InferenceResponse {
+                                response: String::new(),
+                                success: false,
+                                error: Some(format!("{}", e)),
+                            },
+                        };
+
+                        println!("✅ Sending response back");
+                        swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, response)
+                            .ok();
+                    }
+                    SwarmEvent::Behaviour(AxonBehaviourEvent::RequestResponse(
+                        request_response::Event::Message {
+                            message: request_response::Message::Response { response, request_id, .. },
+                            ..
+                        },
+                    )) => {
+                        // Handle responses to our outbound requests (from HTTP)
+                        if let Some(responder) = pending_requests.remove(&request_id) {
+                            let result = if response.success {
+                                Ok(response.response)
+                            } else {
+                                Err(response.error.unwrap_or_else(|| "Unknown error".to_string()))
+                            };
+                            let _ = responder.send(result);
+                        }
+                    }
+                    SwarmEvent::Behaviour(AxonBehaviourEvent::Mdns(mdns::Event::Expired(peers))) => {
+                        for (peer_id, _addr) in peers {
+                            println!("❌ Peer expired: {}", peer_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }

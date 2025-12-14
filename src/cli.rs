@@ -25,6 +25,18 @@ pub enum Mode {
         model: String,
     },
 
+    /// Web mode: Start Leader with HTTP API for web interface
+    #[command(name = "web")]
+    Web {
+        /// Ollama API endpoint (default: http://127.0.0.1:11434)
+        #[arg(long, default_value = "http://127.0.0.1:11434")]
+        ollama_url: String,
+
+        /// Model name to use (default: qwen:0.5b)
+        #[arg(long, default_value = "qwen:0.5b")]
+        model: String,
+    },
+
     /// Subordinate mode: Send an inference request to the Leader
     #[command(name = "ask")]
     Ask {
